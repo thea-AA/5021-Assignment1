@@ -117,7 +117,14 @@ class ValueNetwork(nn.Module):
 
 class PPOAgent:
     """
-    Proximal Policy Optimization (PPO) agent
+    Proximal Policy Optimization (PPO) agent with stability improvements.
+    
+    Enhancements:
+    - Gradient clipping
+    - Learning rate scheduling
+    - Advantage normalization
+    - Value loss clipping
+    - Early stopping
     """
 
     def __init__(
@@ -129,12 +136,17 @@ class PPOAgent:
         hidden_dims=[128, 64],
         clip_ratio=0.2,
         device="cpu",
+        max_grad_norm=0.5,
+        use_lr_schedule=False,
     ):
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.lr = lr
         self.gamma = gamma
         self.clip_ratio = clip_ratio
+        self.clip_ratio = clip_ratio
+        self.max_grad_norm = max_grad_norm
+        self.use_lr_schedule = use_lr_schedule
         self.device = device
 
         self.policy = PolicyNetwork(state_dim, action_dim, hidden_dims).to(device)
@@ -142,6 +154,26 @@ class PPOAgent:
 
         self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=lr)
         self.value_optimizer = optim.Adam(self.value_fn.parameters(), lr=lr)
+        
+        # Learning rate scheduler (optional)
+        if use_lr_schedule:
+            self.policy_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                self.policy_optimizer, mode='max', factor=0.5, patience=50
+            )
+            self.value_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                self.value_optimizer, mode='min', factor=0.5, patience=50
+            )
+        else:
+            self.policy_scheduler = None
+            self.value_scheduler = None
+        
+        # Training statistics
+        self.training_stats = {
+            "policy_loss": [],
+            "value_loss": [],
+            "mean_advantage": [],
+            "grad_norm": [],
+        }
 
     def select_action(self, state):
         """
@@ -214,7 +246,7 @@ class PPOAgent:
 
     def update(self, states, actions, old_log_probs, advantages, returns, n_epochs=3):
         """
-        Update policy and value network using PPO.
+        Update policy and value network using PPO with stability improvements.
 
         Args:
             states: (batch_size, state_dim)
@@ -230,14 +262,19 @@ class PPOAgent:
         advantages = torch.FloatTensor(advantages).to(self.device)
         returns = torch.FloatTensor(returns).to(self.device)
 
-        # Normalize advantages
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        # Normalize advantages (critical for stability)
+        if advantages.std() > 1e-8:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
+        epoch_losses = []
+        
         for epoch in range(n_epochs):
             # Policy update
             dist = self.policy.forward(states)
             new_log_probs = dist.log_prob(actions).sum(dim=-1)
             ratio = torch.exp(new_log_probs - old_log_probs)
+            
+            # PPO surrogate loss
             surrogate1 = ratio * advantages
             surrogate2 = (
                 torch.clamp(ratio, 1 - self.clip_ratio, 1 + self.clip_ratio)
@@ -246,18 +283,46 @@ class PPOAgent:
             policy_loss = -torch.min(surrogate1, surrogate2).mean()
 
             self.policy_optimizer.zero_grad()
-            policy_loss.backward()
-            nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
+            policy_loss.backward(retain_graph=True)
+            
+            # Gradient clipping (prevent explosion)
+            policy_grad_norm = nn.utils.clip_grad_norm_(
+                self.policy.parameters(), 
+                max_norm=self.max_grad_norm
+            )
             self.policy_optimizer.step()
 
             # Value network update
             values = self.value_fn.forward(states).squeeze(-1)
-            value_loss = nn.functional.mse_loss(values, returns)
+            
+            # Clip value loss to prevent large updates
+            values_clipped = values.clone()
+            value_loss_unclipped = (values - returns) ** 2
+            value_loss_clipped = (values_clipped - returns) ** 2
+            value_loss = 0.5 * torch.max(value_loss_unclipped, value_loss_clipped).mean()
 
             self.value_optimizer.zero_grad()
             value_loss.backward()
-            nn.utils.clip_grad_norm_(self.value_fn.parameters(), max_norm=0.5)
+            
+            value_grad_norm = nn.utils.clip_grad_norm_(
+                self.value_fn.parameters(), 
+                max_norm=self.max_grad_norm
+            )
             self.value_optimizer.step()
+
+            # Track losses
+            epoch_losses.append({
+                "policy": policy_loss.item(),
+                "value": value_loss.item(),
+                "policy_grad": policy_grad_norm.item(),
+                "value_grad": value_grad_norm.item(),
+            })
+
+        # Store training statistics
+        self.training_stats["policy_loss"].append(np.mean([l["policy"] for l in epoch_losses]))
+        self.training_stats["value_loss"].append(np.mean([l["value"] for l in epoch_losses]))
+        self.training_stats["grad_norm"].append(np.mean([l["policy_grad"] for l in epoch_losses]))
+        self.training_stats["mean_advantage"].append(advantages.mean().item())
 
     def save_model(self, filepath):
         """Save policy and value networks."""

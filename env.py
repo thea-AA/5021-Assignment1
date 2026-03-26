@@ -128,8 +128,9 @@ class AssetAllocationEnv(gym.Env):
         new_portfolio = self.portfolio + feasible_action
         new_portfolio = normalize_portfolio(new_portfolio)
 
-        # Sample asset returns from N(a, s)
-        asset_returns = self.rng.normal(self.a, self.s)
+        # Sample asset returns from N(a, s) where s is variance
+        # Need to use sqrt(variance) = std dev for sampling
+        asset_returns = self.rng.normal(self.a, np.sqrt(self.s))
 
         # Compute portfolio return: cash interest + risky asset returns
         cash_contribution = new_portfolio[0] * self.r

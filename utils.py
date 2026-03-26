@@ -25,19 +25,29 @@ def merton_optimal_allocation(a, r, s, gamma):
     Analytical optimal allocation for single risk asset + cash (unconstrained).
     From Merton portfolio problem / Rao & Jelvis 8.4.
 
-    p* = (a - r) / (gamma * s^2)
+    p* = (a - r) / (gamma * s)
+
+    NOTE: s here is VARIANCE (not std dev)!
 
     Args:
         a: Expected return of risk asset
         r: Risk-free rate
-        s: Standard deviation of risk asset return
+        s: Variance of risk asset return (NOT std dev)
         gamma: Absolute risk aversion coefficient
 
     Returns:
         Optimal proportion in risk asset (remainder in cash)
     """
     numerator = a - r
-    denominator = gamma * (s ** 2)
+    denominator = gamma * s  # s is already variance
+
+    if abs(denominator) < 1e-10:
+        # Avoid division by zero
+        return {
+            "p_risky": float('inf') if numerator > 0 else float('-inf'),
+            "p_cash": float('-inf'),
+            "is_valid": False,
+        }
 
     p_risky = numerator / denominator
     p_cash = 1.0 - p_risky
