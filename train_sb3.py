@@ -6,7 +6,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 import matplotlib.pyplot as plt
 
-from config import CONFIG_MVP_SANITY, CONFIG_MVP_MULTIPERIOD, CONFIG_TWO_ASSETS
+from config import CONFIG_MVP_SANITY, CONFIG_MVP_MULTIPERIOD, CONFIG_TWO_ASSETS, TRAINING_CONFIG
 from env import AssetAllocationEnv
 from utils import merton_optimal_allocation
 
@@ -20,21 +20,14 @@ class RewardLogger(BaseCallback):
         self.episode_counter = 0
 
     def _on_step(self) -> bool:
-        if "dones" in self.locals:
-            dones = self.locals["dones"]
-            if np.any(dones):
-                for i, done in enumerate(dones):
-                    if done:
-                        reward = self.locals.get("rewards", [0])[i] if isinstance(
-                            self.locals.get("rewards", [0]), (list, np.ndarray)
-                        ) else 0
-                        self.episode_rewards.append(reward)
-                        self.episode_counter += 1
-                        if self.episode_counter % 500 == 0:
-                            avg_reward = np.mean(self.episode_rewards[-500:])
-                            print(
-                                f"Episode {self.episode_counter}: Avg Reward (last 500) = {avg_reward:.6f}"
-                            )
+        # SB3 standard: episode return is stored in infos["episode"]["r"]
+        for info in self.locals.get("infos", []):
+            if "episode" in info:
+                self.episode_rewards.append(info["episode"]["r"])
+                self.episode_counter += 1
+                if self.episode_counter % 500 == 0:
+                    avg_reward = np.mean(self.episode_rewards[-500:])
+                    print(f"Episode {self.episode_counter}: Avg Reward (last 500) = {avg_reward:.6f}")
         return True
 
 
@@ -50,6 +43,7 @@ def train_sb3(config, n_steps=100000):
     env = AssetAllocationEnv(**config)
 
     print("Creating PPO agent...")
+    seed = config.get("seed", TRAINING_CONFIG["seed"])
     model = PPO(
         "MlpPolicy",
         env,
@@ -59,6 +53,7 @@ def train_sb3(config, n_steps=100000):
         n_epochs=10,
         gamma=0.99,
         verbose=0,
+        seed=seed,
     )
 
     print(f"Training for {n_steps} steps...")

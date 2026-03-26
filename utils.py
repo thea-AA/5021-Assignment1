@@ -13,10 +13,9 @@ def cara_utility(wealth, gamma):
     if gamma < 1e-6:
         return wealth
     try:
-        # Clip to avoid overflow
         exponent = np.clip(-gamma * wealth, -100, 100)
         return -np.exp(exponent) / gamma
-    except:
+    except (OverflowError, FloatingPointError, ValueError):
         return -np.inf
 
 
@@ -42,7 +41,6 @@ def merton_optimal_allocation(a, r, s, gamma):
     denominator = gamma * s  # s is already variance
 
     if abs(denominator) < 1e-10:
-        # Avoid division by zero
         return {
             "p_risky": float('inf') if numerator > 0 else float('-inf'),
             "p_cash": float('-inf'),
@@ -55,7 +53,49 @@ def merton_optimal_allocation(a, r, s, gamma):
     return {
         "p_risky": p_risky,
         "p_cash": p_cash,
-        "is_valid": 0 <= p_risky <= 1,  # Check if unconstrained solution is feasible
+        "is_valid": 0 <= p_risky <= 1,
+    }
+
+
+def merton_optimal_allocation_multiasset(a, r, cov_matrix, gamma):
+    """
+    Analytical optimal allocation for n correlated risk assets + cash (unconstrained).
+    Multi-asset Merton formula:
+
+        p* = (1/gamma) * Sigma^{-1} * (mu - r * 1)
+
+    where Sigma is the n×n covariance matrix of risky asset returns.
+
+    Args:
+        a: Array of expected returns, shape (n,)
+        r: Risk-free rate (scalar)
+        cov_matrix: Covariance matrix, shape (n, n)
+        gamma: Absolute risk aversion coefficient
+
+    Returns:
+        dict with:
+            p_risky: optimal risky allocations, shape (n,)
+            p_cash: cash allocation (scalar)
+            is_valid: True if all weights in [0,1] and sum ≤ 1
+    """
+    a = np.array(a)
+    cov = np.array(cov_matrix)
+    excess_return = a - r  # mu - r*1, shape (n,)
+
+    try:
+        cov_inv = np.linalg.inv(cov)
+    except np.linalg.LinAlgError:
+        return {"p_risky": None, "p_cash": None, "is_valid": False, "error": "Singular covariance matrix"}
+
+    p_risky = (1.0 / gamma) * cov_inv @ excess_return  # shape (n,)
+    p_cash = 1.0 - np.sum(p_risky)
+
+    is_valid = bool(np.all(p_risky >= 0) and np.all(p_risky <= 1) and p_cash >= 0)
+
+    return {
+        "p_risky": p_risky,
+        "p_cash": p_cash,
+        "is_valid": is_valid,
     }
 
 

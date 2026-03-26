@@ -30,6 +30,7 @@ class AssetAllocationEnv(gym.Env):
         initial_portfolio,
         initial_wealth=1.0,
         max_portfolio_adjustment=0.1,
+        cov_matrix=None,
         seed=None,
     ):
         """
@@ -38,11 +39,13 @@ class AssetAllocationEnv(gym.Env):
             T: Time horizon (number of steps)
             r: Risk-free rate
             a: List of expected returns for each risk asset
-            s: List of std devs for each risk asset
+            s: List of variances for each risk asset (NOT std dev)
             gamma: Absolute risk aversion coefficient
             initial_portfolio: List [p_cash, p_asset1, ..., p_assetN]
             initial_wealth: Initial wealth
             max_portfolio_adjustment: Max |Δp_k| per step
+            cov_matrix: Optional covariance matrix (n_assets × n_assets).
+                        If None, defaults to diag(s) — independent assets.
             seed: Random seed
         """
         super().__init__()
@@ -57,6 +60,12 @@ class AssetAllocationEnv(gym.Env):
         self.initial_portfolio = np.array(initial_portfolio)
         self.initial_wealth = initial_wealth
         self.max_portfolio_adjustment = max_portfolio_adjustment
+
+        # Covariance matrix: default to diag(s) for independent assets
+        if cov_matrix is not None:
+            self.cov_matrix = np.array(cov_matrix)
+        else:
+            self.cov_matrix = np.diag(self.s)  # diag(variance) = independent
 
         # State: [t/T, W/W0, p0, p1, ..., pN]
         self.observation_space = spaces.Box(
@@ -128,9 +137,9 @@ class AssetAllocationEnv(gym.Env):
         new_portfolio = self.portfolio + feasible_action
         new_portfolio = normalize_portfolio(new_portfolio)
 
-        # Sample asset returns from N(a, s) where s is variance
-        # Need to use sqrt(variance) = std dev for sampling
-        asset_returns = self.rng.normal(self.a, np.sqrt(self.s))
+        # Sample asset returns: correlated multivariate normal
+        # Σ is the covariance matrix; mean = a, Cov = cov_matrix
+        asset_returns = self.rng.multivariate_normal(self.a, self.cov_matrix)
 
         # Compute portfolio return: cash interest + risky asset returns
         cash_contribution = new_portfolio[0] * self.r

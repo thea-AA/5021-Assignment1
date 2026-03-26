@@ -67,7 +67,24 @@ CONFIG_FOUR_ASSETS = {
     "max_portfolio_adjustment": 0.1,
 }
 
-# Training hyperparameters
+# Config: Two correlated risk assets (ρ = 0.4)
+CONFIG_CORRELATED_ASSETS = {
+    "n_assets": 2,
+    "T": 5,
+    "r": 0.02,
+    "a": [0.08, 0.12],
+    "s": [0.0016, 0.0081],          # variances: σ₁=0.04, σ₂=0.09
+    "cov_matrix": [                  # Σ = [[0.0016, 0.00144], [0.00144, 0.0081]]
+        [0.0016,  0.00144],          # ρ=0.4: cov = ρ*σ₁*σ₂ = 0.4*0.04*0.09
+        [0.00144, 0.0081],
+    ],
+    "gamma": 1.0,
+    "initial_portfolio": [0.2, 0.4, 0.4],
+    "initial_wealth": 1.0,
+    "max_portfolio_adjustment": 0.1,
+}
+
+
 TRAINING_CONFIG = {
     "n_episodes": 5000,
     "learning_rate": 3e-4,
