@@ -5,7 +5,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 
-from utils import normalize_portfolio, project_action_to_feasible_set, reward_function
+from utils import project_action_to_feasible_set, reward_function
 
 
 class AssetAllocationEnv(gym.Env):
@@ -125,34 +125,43 @@ class AssetAllocationEnv(gym.Env):
         if self.t >= self.T:
             raise RuntimeError("Episode already finished, call reset().")
 
-        # Scale action from [-1, 1] to raw adjustment range
+        # Scale action from [-1, 1] to raw adjustment space, then project
         raw_action = action * self.max_portfolio_adjustment
 
-        # Project action to feasible set
+        # Project action to feasible set (constraints A/B/C enforced inside)
+        # After projection: Σ Δp = 0, so new_portfolio already sums to 1.
         feasible_action = project_action_to_feasible_set(
             raw_action, self.portfolio, self.max_portfolio_adjustment
         )
+        rebalanced_portfolio = self.portfolio + feasible_action
 
-        # Apply portfolio adjustment
-        new_portfolio = self.portfolio + feasible_action
-        new_portfolio = normalize_portfolio(new_portfolio)
-
-        # Sample asset returns: correlated multivariate normal
-        # Σ is the covariance matrix; mean = a, Cov = cov_matrix
+        # Sample asset returns: R_k ~ N(a_k, Σ)
         asset_returns = self.rng.multivariate_normal(self.a, self.cov_matrix)
 
-        # Compute portfolio return: cash interest + risky asset returns
-        cash_contribution = new_portfolio[0] * self.r
-        risky_contributions = new_portfolio[1:] * asset_returns
-        portfolio_return = cash_contribution + np.sum(risky_contributions)
+        # Portfolio return: r_p = p_cash * r + Σ p_k * R_k
+        portfolio_return = (
+            rebalanced_portfolio[0] * self.r
+            + np.dot(rebalanced_portfolio[1:], asset_returns)
+        )
 
-        # Update wealth
-        new_wealth = self.wealth * (1 + portfolio_return)
+        # New wealth
+        new_wealth = self.wealth * (1.0 + portfolio_return)
 
-        # Prepare output
+        # ── Market Drift ──────────────────────────────────────────────────────
+        # After earning returns, each asset's value grows at a different rate,
+        # so weights naturally drift.  The state at the START of the next period
+        # is the post-drift portfolio, NOT the pre-return rebalanced portfolio.
+        #
+        #   p_k^{t+1} = p_k^t * (1 + R_k) / Σ_j p_j^t * (1 + R_j)
+        #
+        # This is the standard discrete-time portfolio dynamics.
+        gross = np.concatenate([[1.0 + self.r], 1.0 + asset_returns])
+        drifted = rebalanced_portfolio * gross
+        self.portfolio = drifted / drifted.sum()   # renormalise to simplex
+        # ─────────────────────────────────────────────────────────────────────
+
         self.t += 1
         self.wealth = new_wealth
-        self.portfolio = new_portfolio
 
         reward = 0.0
         terminated = self.t >= self.T
@@ -163,7 +172,8 @@ class AssetAllocationEnv(gym.Env):
 
         obs = self._get_observation()
         info = {
-            "portfolio": new_portfolio.copy(),
+            "portfolio": self.portfolio.copy(),   # post-drift weights (start of next period)
+            "rebalanced_portfolio": rebalanced_portfolio.copy(),  # pre-drift (what was traded)
             "wealth": new_wealth,
             "asset_returns": asset_returns,
             "portfolio_return": portfolio_return,

@@ -8,7 +8,7 @@ CONFIG_MVP_SANITY = {
     "T": 1,                         # Single period
     "r": 0.02,                      # Cash interest rate
     "a": [0.08],                    # Expected return of asset 1
-    "s": [0.0016],                  # Variance of asset 1 (NOT std dev!)
+    "s": [0.0016],                  # Variance of asset 1
     "gamma": 1.0,                   # Absolute risk aversion coefficient
     "initial_portfolio": [0.5, 0.5],  # [cash, asset1]
     "initial_wealth": 1.0,

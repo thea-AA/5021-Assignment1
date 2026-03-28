@@ -113,40 +113,59 @@ def normalize_portfolio(portfolio, method="sum_to_one"):
     return portfolio
 
 
-def project_action_to_feasible_set(action, current_portfolio, max_adjustment=0.1):
+def project_action_to_feasible_set(raw_action, current_portfolio, max_adjustment=0.1):
     """
-    Project action (portfolio adjustment) to feasible set.
-    Constraints:
-    1. |Δp_k| ≤ max_adjustment
-    2. sum(Δp) = 0 (total portfolio stays at 1)
-    3. p_new = p_current + Δp ≥ 0 (no short selling)
+    Project raw RL action onto the feasible rebalancing set.
 
-    Args:
-        action: Raw action (unconstrained adjustment)
-        current_portfolio: Current portfolio allocation
-        max_adjustment: Maximum adjustment per period
+    Three constraints enforced simultaneously:
+      (A) Σ_k Δp_k = 0
+            Budget-neutral: total bought = total sold (cash is just another asset).
+      (B) Σ_{k: Δp_k > 0} Δp_k ≤ max_adjustment
+            One-way turnover ≤ 10%.  This is the correct reading of "adjust at
+            most 10% of your portfolio": you can move at most 10% of wealth from
+            sellers to buyers.  With n=4 assets the old per-asset clip would have
+            allowed 4×10% = 40% buys — 80% two-way turnover — badly wrong.
+      (C) p_k + Δp_k ≥ 0  for all k
+            No short-selling.
 
-    Returns:
-        Feasible action that satisfies all constraints
+    Algorithm (O(n), converges in ≤ n+2 iterations):
+      1. Center Δp so Σ=0  [satisfies A initially]
+      2. Scale down if one-way turnover > max_adjustment  [satisfies B]
+      3. Iteratively fix short positions:
+           set Δp_k = −p_k for each over-sold k,
+           reduce buys proportionally to restore Σ=0  [maintains A, may loosen B]
     """
-    # Step 1: Clip to [-max_adjustment, max_adjustment]
-    clipped_action = np.clip(action, -max_adjustment, max_adjustment)
+    p = np.asarray(current_portfolio, dtype=np.float64)
+    delta = np.asarray(raw_action, dtype=np.float64).copy()
 
-    # Step 2: Ensure new portfolio is non-negative
-    new_portfolio = current_portfolio + clipped_action
-    negative_mask = new_portfolio < 0
-    clipped_action[negative_mask] = -current_portfolio[negative_mask]
+    # (A) Project onto Σ=0 hyperplane
+    delta -= delta.mean()
 
-    # Step 3: Adjust to ensure sum(action) = 0
-    # Move excess to cash (index 0)
-    action_sum = np.sum(clipped_action)
-    clipped_action[0] -= action_sum  # Adjust cash position
+    # (B) Scale to one-way turnover constraint
+    one_way = np.maximum(delta, 0.0).sum()
+    if one_way > max_adjustment + 1e-9:
+        delta *= max_adjustment / one_way
 
-    # Ensure cash doesn't go negative
-    if clipped_action[0] + current_portfolio[0] < 0:
-        clipped_action[0] = -current_portfolio[0]
+    # (C) Iteratively enforce no-shorting
+    for _ in range(len(p) + 2):
+        new_p = p + delta
+        if new_p.min() >= -1e-9:
+            break
+        short_mask = new_p < 0
+        # Bring over-sold positions to zero (reduce sell)
+        delta[short_mask] = -p[short_mask]
+        # Σ delta is now > 0; redistribute excess by scaling down buy positions
+        excess = delta.sum()
+        buy_mask = delta > 1e-12
+        total_buy = delta[buy_mask].sum()
+        if total_buy > 1e-12:
+            delta[buy_mask] -= excess * delta[buy_mask] / total_buy
+        else:
+            delta[short_mask] = 0.0
 
-    return clipped_action
+    # Numerical cleanup: enforce exact Σ=0
+    delta -= delta.sum() / len(delta)
+    return delta
 
 
 def simulate_one_step(wealth, portfolio, action, returns, r, max_adjustment=0.1):
