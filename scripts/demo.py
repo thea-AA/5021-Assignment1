@@ -1,6 +1,9 @@
 """
 Comprehensive demo showing MVP working across different configurations
 """
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import numpy as np
 import matplotlib.pyplot as plt
 from stable_baselines3 import PPO

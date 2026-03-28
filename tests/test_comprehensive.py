@@ -2,6 +2,9 @@
 Comprehensive test suite for asset allocation RL solution
 Tests all constraints and requirements from the problem statement.
 """
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import numpy as np
 import torch
 from typing import Dict, List, Tuple

@@ -1,6 +1,9 @@
 """
 Test and demo script for asset allocation RL
 """
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import numpy as np
 import matplotlib.pyplot as plt
 from config import CONFIG_MVP_SANITY, CONFIG_MVP_MULTIPERIOD, CONFIG_TWO_ASSETS, TRAINING_CONFIG

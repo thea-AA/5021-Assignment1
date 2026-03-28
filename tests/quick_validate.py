@@ -2,6 +2,9 @@
 Quick validation script to demonstrate solution correctness.
 Tests the key fixes and shows comparison with analytical solution.
 """
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import numpy as np
 import torch
 from config import CONFIG_MVP_SANITY, TRAINING_CONFIG

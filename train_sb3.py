@@ -161,8 +161,8 @@ if __name__ == "__main__":
     compare_with_analytical(CONFIG_MVP_SANITY, model)
 
     # Save model
-    model.save("asset_allocation_ppo")
-    print("\nModel saved to asset_allocation_ppo.zip")
+    model.save("outputs/asset_allocation_ppo")
+    print("\nModel saved to outputs/asset_allocation_ppo.zip")
 
     # Plot learning curve
     if len(rewards) > 0:
@@ -176,5 +176,5 @@ if __name__ == "__main__":
         plt.title("Learning Curve: PPO on Asset Allocation")
         plt.legend()
         plt.grid()
-        plt.savefig("learning_curve.png")
-        print("Learning curve saved to learning_curve.png")
+        plt.savefig("outputs/learning_curve.png")
+        print("Learning curve saved to outputs/learning_curve.png")
