@@ -89,10 +89,13 @@ TRAINING_CONFIG = {
     "n_episodes": 5000,
     "learning_rate": 3e-4,
     "gamma_discount": 0.99,  # Discount factor for RL (not risk aversion)
-    "batch_size": 64,
+    "batch_size": 128,
     "hidden_dims": [128, 64],
     "seed": 42,
     "clip_ratio": 0.2,
+    "max_grad_norm": 0.5,
+    "use_lr_schedule": False,  # Disable LR scheduler initially for debugging
+    "entropy_coef": 0.01,  # Entropy coefficient for exploration
 }
 
 # Test configurations for different scenarios

@@ -96,6 +96,10 @@ def train(env_config, train_config, n_episodes=None):
         lr=train_config["learning_rate"],
         gamma=train_config["gamma_discount"],
         hidden_dims=train_config["hidden_dims"],
+        clip_ratio=train_config.get("clip_ratio", 0.2),
+        max_grad_norm=train_config.get("max_grad_norm", 0.5),
+        use_lr_schedule=train_config.get("use_lr_schedule", True),
+        entropy_coef=train_config.get("entropy_coef", 0.01),
         device=device,
     )
 
@@ -120,12 +124,15 @@ def train(env_config, train_config, n_episodes=None):
         advantages, returns = agent.compute_advantage(rewards, values, dones)
 
         # Update agent
+        # values includes bootstrap value at the end, so old_values = values[:-1]
+        old_values = values[:-1]
         agent.update(
             states=states,
             actions=actions,
             old_log_probs=log_probs,
             advantages=advantages,
             returns=returns,
+            old_values=old_values,
             n_epochs=3,
         )
 
@@ -135,12 +142,35 @@ def train(env_config, train_config, n_episodes=None):
         episode_rewards.append(episode_reward)
         episode_final_wealths.append(final_wealth)
 
-        if (episode + 1) % 500 == 0:
-            avg_reward = np.mean(episode_rewards[-500:])
-            avg_wealth = np.mean(episode_final_wealths[-500:])
-            print(
-                f"Episode {episode+1}: Avg Reward={avg_reward:.4f}, Avg Wealth={avg_wealth:.4f}"
-            )
+        if (episode + 1) % 100 == 0:
+            # Print training statistics
+            if agent.training_stats["policy_loss"]:
+                # Get the latest statistics (average over last update)
+                latest_policy_loss = agent.training_stats["policy_loss"][-1]
+                latest_value_loss = agent.training_stats["value_loss"][-1]
+                latest_entropy = agent.training_stats["entropy"][-1] if agent.training_stats["entropy"] else 0.0
+                latest_mean_advantage = agent.training_stats["mean_advantage"][-1]
+                latest_grad_norm = agent.training_stats["grad_norm"][-1] if agent.training_stats["grad_norm"] else 0.0
+
+                # Get current learning rate
+                current_lr = agent.policy_optimizer.param_groups[0]['lr']
+
+                # Calculate recent performance
+                recent_rewards = episode_rewards[-100:] if len(episode_rewards) >= 100 else episode_rewards
+                recent_wealths = episode_final_wealths[-100:] if len(episode_final_wealths) >= 100 else episode_final_wealths
+                avg_reward = np.mean(recent_rewards) if recent_rewards else 0.0
+                avg_wealth = np.mean(recent_wealths) if recent_wealths else 0.0
+
+                print(
+                    f"Episode {episode+1:4d}: "
+                    f"Reward={avg_reward:.4f}, "
+                    f"Wealth={avg_wealth:.4f}, "
+                    f"Policy Loss={latest_policy_loss:.4f}, "
+                    f"Value Loss={latest_value_loss:.4f}, "
+                    f"Entropy={latest_entropy:.4f}, "
+                    f"Advantage={latest_mean_advantage:.4f}, "
+                    f"LR={current_lr:.6f}"
+                )
 
     return agent, episode_rewards, episode_final_wealths
 

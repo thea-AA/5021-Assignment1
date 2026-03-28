@@ -137,16 +137,17 @@ class PPOAgent:
         clip_ratio=0.2,
         device="cpu",
         max_grad_norm=0.5,
-        use_lr_schedule=False,
+        use_lr_schedule=True,
+        entropy_coef=0.01,
     ):
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.lr = lr
         self.gamma = gamma
         self.clip_ratio = clip_ratio
-        self.clip_ratio = clip_ratio
         self.max_grad_norm = max_grad_norm
         self.use_lr_schedule = use_lr_schedule
+        self.entropy_coef = entropy_coef
         self.device = device
 
         self.policy = PolicyNetwork(state_dim, action_dim, hidden_dims).to(device)
@@ -158,10 +159,10 @@ class PPOAgent:
         # Learning rate scheduler (optional)
         if use_lr_schedule:
             self.policy_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                self.policy_optimizer, mode='max', factor=0.5, patience=50
+                self.policy_optimizer, mode='max', factor=0.5, patience=200, min_lr=1e-6
             )
             self.value_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                self.value_optimizer, mode='min', factor=0.5, patience=50
+                self.value_optimizer, mode='min', factor=0.5, patience=200, min_lr=1e-6
             )
         else:
             self.policy_scheduler = None
@@ -173,6 +174,7 @@ class PPOAgent:
             "value_loss": [],
             "mean_advantage": [],
             "grad_norm": [],
+            "entropy": [],
         }
 
     def select_action(self, state):
@@ -232,19 +234,16 @@ class PPOAgent:
         gae = 0
 
         for t in reversed(range(T)):
-            if t == T - 1:
-                next_value = values[t + 1]
-            else:
-                next_value = values[t + 1]
-
-            delta = rewards[t] + self.gamma * next_value * (1 - dones[t]) - values[t]
+            # next_value is bootstrap value for terminal state
+            next_value = values[t + 1] * (1 - dones[t])  # if done, next_value = 0
+            delta = rewards[t] + self.gamma * next_value - values[t]
             gae = delta + self.gamma * 0.95 * (1 - dones[t]) * gae
             advantages[t] = gae
 
         returns = advantages + values[:T]
         return advantages, returns
 
-    def update(self, states, actions, old_log_probs, advantages, returns, n_epochs=3):
+    def update(self, states, actions, old_log_probs, advantages, returns, old_values=None, n_epochs=3):
         """
         Update policy and value network using PPO with stability improvements.
 
@@ -254,6 +253,7 @@ class PPOAgent:
             old_log_probs: (batch_size,)
             advantages: (batch_size,)
             returns: (batch_size,)
+            old_values: (batch_size,) old value predictions from rollout (optional, used for value clipping)
             n_epochs: Number of epochs per update
         """
         states = torch.FloatTensor(states).to(self.device)
@@ -261,6 +261,13 @@ class PPOAgent:
         old_log_probs = torch.FloatTensor(old_log_probs).to(self.device)
         advantages = torch.FloatTensor(advantages).to(self.device)
         returns = torch.FloatTensor(returns).to(self.device)
+
+        # Use provided old_values or compute from returns - advantages
+        if old_values is not None:
+            old_values_tensor = torch.FloatTensor(old_values).to(self.device)
+        else:
+            # Fallback: compute from returns - advantages
+            old_values_tensor = returns - advantages
 
         # Normalize advantages (critical for stability)
         if advantages.std() > 1e-8:
@@ -282,6 +289,10 @@ class PPOAgent:
             )
             policy_loss = -torch.min(surrogate1, surrogate2).mean()
 
+            # Entropy bonus for exploration
+            entropy = dist.entropy().sum(dim=-1).mean()
+            policy_loss = policy_loss - self.entropy_coef * entropy
+
             self.policy_optimizer.zero_grad()
             policy_loss.backward(retain_graph=True)
             
@@ -295,8 +306,8 @@ class PPOAgent:
             # Value network update
             values = self.value_fn.forward(states).squeeze(-1)
             
-            # Clip value loss to prevent large updates
-            values_clipped = values.clone()
+            # Clip value loss to prevent large updates (PPO-style)
+            values_clipped = old_values_tensor + torch.clamp(values - old_values_tensor, -self.clip_ratio, self.clip_ratio)
             value_loss_unclipped = (values - returns) ** 2
             value_loss_clipped = (values_clipped - returns) ** 2
             value_loss = 0.5 * torch.max(value_loss_unclipped, value_loss_clipped).mean()
@@ -316,13 +327,27 @@ class PPOAgent:
                 "value": value_loss.item(),
                 "policy_grad": policy_grad_norm.item(),
                 "value_grad": value_grad_norm.item(),
+                "entropy": entropy.item(),
             })
 
         # Store training statistics
-        self.training_stats["policy_loss"].append(np.mean([l["policy"] for l in epoch_losses]))
-        self.training_stats["value_loss"].append(np.mean([l["value"] for l in epoch_losses]))
+        avg_policy_loss = np.mean([l["policy"] for l in epoch_losses])
+        avg_value_loss = np.mean([l["value"] for l in epoch_losses])
+        avg_entropy = np.mean([l["entropy"] for l in epoch_losses])
+
+        self.training_stats["policy_loss"].append(avg_policy_loss)
+        self.training_stats["value_loss"].append(avg_value_loss)
+        self.training_stats["entropy"].append(avg_entropy)
         self.training_stats["grad_norm"].append(np.mean([l["policy_grad"] for l in epoch_losses]))
         self.training_stats["mean_advantage"].append(advantages.mean().item())
+
+        # Update learning rate schedulers
+        if self.policy_scheduler is not None:
+            # Policy scheduler: mode='max', we want to maximize negative loss (minimize loss)
+            self.policy_scheduler.step(-avg_policy_loss)
+        if self.value_scheduler is not None:
+            # Value scheduler: mode='min', we want to minimize value loss
+            self.value_scheduler.step(avg_value_loss)
 
     def save_model(self, filepath):
         """Save policy and value networks."""
