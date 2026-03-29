@@ -7,6 +7,8 @@ Enhanced version with random configuration generation.
 
 import sys
 import os
+from pathlib import Path
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
@@ -16,6 +18,8 @@ from tabulate import tabulate
 import json
 from datetime import datetime
 
+sys.path.append(str(Path(__file__).parent.parent))
+import config
 from config import (
     CONFIG_MVP_SANITY,
     CONFIG_MVP_MULTIPERIOD,
