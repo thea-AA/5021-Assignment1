@@ -62,7 +62,7 @@ class PolicyNetwork(nn.Module):
 
         mu = torch.clamp(mu, -2, 2)
 
-        log_std_clipped = torch.clamp(self.log_std, min=-20, max=1)
+        log_std_clipped = torch.clamp(self.log_std, min=-1, max=1)
         std = torch.exp(log_std_clipped)
         std = torch.clamp(std, min=0.01, max=1.0)
 

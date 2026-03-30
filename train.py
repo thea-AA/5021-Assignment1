@@ -106,56 +106,64 @@ def train(env_config, train_config, n_episodes=None):
     np.random.seed(train_config["seed"])
     torch.manual_seed(train_config["seed"])
 
+    # Number of episodes to collect before each gradient update.
+    # Batching across episodes gives cross-episode advantage variance, which
+    # prevents the advantage≈0 collapse that occurs with terminal-only rewards
+    # when only a single episode is used per update.
+    n_rollouts = train_config.get("n_rollouts_per_update", 1)
+
     # Training loop
     episode_rewards = []
     episode_final_wealths = []
+    batch_data = []  # accumulate episodes before updating
 
     for episode in tqdm(range(n_episodes), desc="Training"):
         trajectory = rollout_episode(env, agent)
 
-        states = trajectory["states"]
-        actions = trajectory["actions"]
-        log_probs = trajectory["log_probs"]
         rewards = trajectory["rewards"]
-        dones = trajectory["dones"]
-        values = trajectory["values"]
+        values  = trajectory["values"]
+        dones   = trajectory["dones"]
 
-        # Compute advantages and returns
+        # Compute advantages and returns for this episode
         advantages, returns = agent.compute_advantage(rewards, values, dones)
 
-        # Update agent
-        # values includes bootstrap value at the end, so old_values = values[:-1]
-        old_values = values[:-1]
-        agent.update(
-            states=states,
-            actions=actions,
-            old_log_probs=log_probs,
-            advantages=advantages,
-            returns=returns,
-            old_values=old_values,
-            n_epochs=3,
-        )
+        batch_data.append({
+            "states":     trajectory["states"],
+            "actions":    trajectory["actions"],
+            "log_probs":  trajectory["log_probs"],
+            "advantages": advantages,
+            "returns":    returns,
+            "old_values": values[:-1],
+        })
 
-        # Track performance
-        episode_reward = np.sum(rewards)
-        final_wealth = env.wealth
-        episode_rewards.append(episode_reward)
-        episode_final_wealths.append(final_wealth)
+        # Track performance (per episode, independent of update frequency)
+        episode_rewards.append(np.sum(rewards))
+        episode_final_wealths.append(env.wealth)
+
+        # Perform gradient update once the batch is full
+        if len(batch_data) >= n_rollouts:
+            agent.update(
+                states=np.concatenate([d["states"]     for d in batch_data]),
+                actions=np.concatenate([d["actions"]   for d in batch_data]),
+                old_log_probs=np.concatenate([d["log_probs"]  for d in batch_data]),
+                advantages=np.concatenate([d["advantages"]    for d in batch_data]),
+                returns=np.concatenate([d["returns"]          for d in batch_data]),
+                old_values=np.concatenate([d["old_values"]    for d in batch_data]),
+                n_epochs=3,
+            )
+            batch_data = []
 
         if (episode + 1) % 100 == 0:
             # Print training statistics
             if agent.training_stats["policy_loss"]:
-                # Get the latest statistics (average over last update)
                 latest_policy_loss = agent.training_stats["policy_loss"][-1]
                 latest_value_loss = agent.training_stats["value_loss"][-1]
                 latest_entropy = agent.training_stats["entropy"][-1] if agent.training_stats["entropy"] else 0.0
                 latest_mean_advantage = agent.training_stats["mean_advantage"][-1]
                 latest_grad_norm = agent.training_stats["grad_norm"][-1] if agent.training_stats["grad_norm"] else 0.0
 
-                # Get current learning rate
                 current_lr = agent.policy_optimizer.param_groups[0]['lr']
 
-                # Calculate recent performance
                 recent_rewards = episode_rewards[-100:] if len(episode_rewards) >= 100 else episode_rewards
                 recent_wealths = episode_final_wealths[-100:] if len(episode_final_wealths) >= 100 else episode_final_wealths
                 avg_reward = np.mean(recent_rewards) if recent_rewards else 0.0
@@ -171,6 +179,18 @@ def train(env_config, train_config, n_episodes=None):
                     f"Advantage={latest_mean_advantage:.4f}, "
                     f"LR={current_lr:.6f}"
                 )
+
+    # Flush any remaining episodes that didn't fill the last batch
+    if batch_data:
+        agent.update(
+            states=np.concatenate([d["states"]     for d in batch_data]),
+            actions=np.concatenate([d["actions"]   for d in batch_data]),
+            old_log_probs=np.concatenate([d["log_probs"]  for d in batch_data]),
+            advantages=np.concatenate([d["advantages"]    for d in batch_data]),
+            returns=np.concatenate([d["returns"]          for d in batch_data]),
+            old_values=np.concatenate([d["old_values"]    for d in batch_data]),
+            n_epochs=3,
+        )
 
     return agent, episode_rewards, episode_final_wealths
 

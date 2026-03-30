@@ -96,6 +96,7 @@ TRAINING_CONFIG = {
     "max_grad_norm": 0.5,
     "use_lr_schedule": False,  # Disable LR scheduler initially for debugging
     "entropy_coef": 0.01,  # Entropy coefficient for exploration
+    "n_rollouts_per_update": 4,  # Episodes to collect before each gradient update
 }
 
 # Test configurations for different scenarios
