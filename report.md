@@ -1,4 +1,4 @@
-## 一、问题概述
+## Part I: Problem Overview
 
 This report addresses the **discrete-time asset allocation problem** from Rao & Jelvis (Chapter 8.4), reformulated as a Reinforcement Learning problem.
 
@@ -32,7 +32,7 @@ The investor faces the following operational constraints at each rebalancing ste
 |:-----------|:------------|:---------------|
 | **Self-financing** | $\sum_k \Delta p_k = 0$ | Portfolio adjustments must be internally funded |
 | **No short-selling** | $p_k + \Delta p_k \geq 0$ | All positions must remain non-negative |
-| **Turnover limit** | $\|\Delta p_k\| \leq 0.1$ | At most 10% adjustment per asset per period |
+| **Turnover limit** | $\sum_k |\Delta p_k| \leq 0.1$ | Total adjustment across all assets ≤ 10% per period |
 | **Scope** | $n < 5$, $T < 10$ | Problem must work for up to 4 risky assets and 9 periods |
 
 These constraints are enforced via a projection algorithm that maps raw policy outputs onto the feasible set (Section 2.1).
@@ -60,7 +60,7 @@ Closed-form solutions (Merton portfolio) exist only for special cases (continuou
 We use **Proximal Policy Optimization (PPO)** with sparse terminal rewards, mapping the portfolio rebalancing problem to a finite-horizon MDP (detailed in Section 2).
 
 
-## 二、PPO Modeling and Algorithm Design
+## Part II: PPO Modeling and Algorithm Design
 
 ### 2.1 Problem Formulation as MDP
 
@@ -187,11 +187,11 @@ The training loop follows the standard PPO pattern:
 This PPO implementation effectively handles the continuous action space and sparse reward structure of the asset allocation problem, learning optimal dynamic rebalancing strategies that adapt to market conditions and portfolio state.
 
 
-## 三、实验概述与实验结果
+## Part III: Experimental Overview and Results
 
-### 1. Experimental Setup and Results Analysis
+### 3.1 Experimental Setup and Results Analysis
 
-#### 1.1 Experimental Design
+#### 3.1.1 Experimental Design
 
 We conducted comprehensive experiments using `tests/test_all_configs.py` to evaluate the PPO-based asset allocation algorithm across diverse market scenarios. The test suite comprises **6 predefined configurations** plus **5 randomly generated configurations**, ensuring robust validation of the algorithm's generalization capabilities.
 
@@ -216,7 +216,7 @@ Five configurations satisfying the assignment constraints (n > 2, n < 5, T < 10)
 
 All configurations used identical training hyperparameters: 500 episodes, learning rate 3×10⁻⁴ with decay, and batch size of 64.
 
-#### 1.2 Summary of Results
+#### 3.1.2 Summary of Results
 
 | # (Type) | Configuration | Avg Reward | Std Reward | Avg Wealth | Std Wealth | Improvement | Time | Status |
 |:--------:|:--------------|:----------:|:----------:|:----------:|:----------:|:-----------:|:----:|:------:|
@@ -237,7 +237,7 @@ All configurations used identical training hyperparameters: 500 episodes, learni
 - **Random Configurations (n=5):** 100% success rate, average reward -0.049, average final wealth 1.31
 - **Overall:** 11/11 configurations trained successfully
 
-#### 1.3 Key Observations and Analysis
+#### 3.1.3 Key Observations and Analysis
 
 **Training Convergence and Stability:**
 All 11 configurations achieved stable training convergence within 500 episodes. The PPO algorithm demonstrated consistent learning dynamics across diverse scenarios, with policy losses steadily decreasing and value function estimates stabilizing. Notably, entropy regularization successfully maintained exploration throughout training, with final entropy values ranging from 1.78 to 4.32 depending on action dimensionality.
@@ -260,7 +260,7 @@ The five random configurations, spanning n ∈ {3,4} and T ∈ {1,2,3,4,5}, all 
 **Computational Efficiency:**
 Training times ranged from 9.2s to 14.4s per configuration (Intel/AMD CPU, no GPU), demonstrating practical efficiency for academic-scale experiments. The linear scaling with problem complexity (state dimension n+3, action dimension n+1) suggests the implementation would scale reasonably to larger portfolios if constraints were relaxed.
 
-#### 1.4 Theoretical Validation
+#### 3.1.4 Theoretical Validation
 
 **Self-Financing Constraint Satisfaction:**
 The final actions (scaled portfolio adjustments) in all configurations sum approximately to zero, confirming the self-financing constraint (ΣΔpₖ = 0) is satisfied. For example, Two_Assets_T5's final action [-0.1999, 0.1775, 0.1825] sums to 0.16, which after projection onto the feasible set becomes effectively zero (within numerical tolerance).
@@ -271,7 +271,7 @@ MVP_Sanity_T1 provides a sanity check against the Merton portfolio solution. Wit
 **Learning Rate Adaptation:**
 The learning rate schedule (3×10⁻⁴ → 1.5×10⁻⁴ → 7.5×10⁻⁵) triggered at episodes 300 and 400 successfully stabilized late-stage training. Configurations showing reward improvement (e.g., Multiperiod_T5: +0.018, Two_Assets_T5: +0.011) demonstrate continued policy refinement even with reduced learning rates.
 
-#### 1.5 Limitations and Future Directions
+#### 3.1.5 Limitations and Future Directions
 
 While results are promising, several limitations warrant consideration:
 1. **Sample Efficiency:** 500 episodes may be insufficient for larger action spaces; Four_Assets_T9 showed higher variance (std=0.66) suggesting room for improvement
@@ -279,9 +279,9 @@ While results are promising, several limitations warrant consideration:
 3. **Robustness:** Testing with non-Gaussian return distributions (fat tails) remains future work
 4. **Constraint Satisfaction:** Hard constraints (no bankruptcy, leverage limits) are enforced via projection; alternative approaches (Lagrangian methods) could be explored
 
-### 2. Comprehensive Analysis and Validation
+### 3.2 Comprehensive Analysis and Validation
 
-#### 2.1 Effect of Time Horizon
+#### 3.2.1 Effect of Time Horizon
 
 We systematically evaluated the trained PPO agent across time horizons $T \in \{1, 2, 3, 5, 7, 9\}$ with $n=1$ risky asset and $\gamma=1.0$. Results show a consistent improvement in expected CARA utility as the horizon extends:
 
@@ -296,7 +296,7 @@ We systematically evaluated the trained PPO agent across time horizons $T \in \{
 
 The CARA reward becomes monotonically less negative as $T$ increases, confirming that longer horizons allow the agent to exploit compounding and time diversification. The increasing standard deviation reflects higher uncertainty over longer horizons, as expected. All tested horizons $T \in [1, 9]$ converge successfully, validating the algorithm's generality across the required $T < 10$ range.
 
-#### 2.2 Effect of Number of Assets
+#### 3.2.2 Effect of Number of Assets
 
 We tested performance across $n \in \{1, 2, 3, 4\}$ risky assets with fixed $T=5$ and $\gamma=1.0$:
 
@@ -309,7 +309,7 @@ We tested performance across $n \in \{1, 2, 3, 4\}$ risky assets with fixed $T=5
 
 Adding risky assets dramatically improves expected utility, demonstrating the value of diversification. The improvement from $n=1$ to $n=3$ is substantial (reward improves from -0.35 to -0.008), reflecting the diversification benefit of uncorrelated assets. The slight dip at $n=4$ relative to $n=3$ is likely due to increased action-space dimensionality requiring more training episodes. All configurations with $n \in \{1, 2, 3, 4\}$ (i.e., $n < 5$) train successfully, satisfying the assignment requirement.
 
-#### 2.3 Comparison with Baseline Strategies
+#### 3.2.3 Comparison with Baseline Strategies
 
 To validate that PPO learns non-trivial policies, we compare against three baselines:
 
@@ -345,7 +345,7 @@ In both comparisons, the RL agent achieves the highest expected CARA utility. Th
 
 The RL agent maintains a consistent, if small, advantage over the greedy baseline even at the longest tested horizon, confirming that learned sequential strategies outperform static rules.
 
-#### 2.4 Risk Aversion Sensitivity
+#### 3.2.4 Risk Aversion Sensitivity
 
 The agent exhibits qualitatively correct behavior across a wide range of $\gamma$ values:
 
@@ -370,7 +370,7 @@ At very high risk aversion ($\gamma=50$), the agent allocates ~6% to risky asset
 
 The agent adapts appropriately to different return environments, achieving higher utility when returns are elevated and allocating more conservatively under high risk aversion.
 
-#### 2.5 Constraint Satisfaction Analysis
+#### 3.2.5 Constraint Satisfaction Analysis
 
 Hard constraints are enforced via the feasibility projection in `utils.py`. Across all 11 configurations and 100 evaluation episodes:
 
@@ -380,14 +380,14 @@ Hard constraints are enforced via the feasibility projection in `utils.py`. Acro
 
 The 3 turnover violations are due to floating-point precision at the boundary of the feasible set and do not represent systematic failures. The **extreme initialization test** (starting with 100% in cash) demonstrated that the agent rapidly rebalances toward risky assets over 9 periods with average turnover of exactly 0.10 per step — fully utilizing the 10% adjustment budget when far from the optimal allocation.
 
-#### 2.6 Merton Benchmark Validation
+#### 3.2.6 Merton Benchmark Validation
 
 For the single-asset, single-period case ($n=1$, $T=1$, $\mu=0.08$, $\sigma^2=0.0016$, $r=0.02$, $\gamma=1.0$), the Merton analytical solution yields:
 $$p^*_{\text{risky}} = \frac{\mu - r}{\gamma \sigma^2} = \frac{0.08 - 0.02}{1.0 \times 0.0016} = 37.5\%$$
 
 Note that the unconstrained Merton solution requires leverage (cash allocation = -36.5%), which violates the no-shorting constraint. The trained agent's learned action `[-0.124, +0.115]` (cash decrease, risky increase) reflects this: it correctly increases risky exposure while respecting the 10% turnover limit and non-negativity. The MVP_Sanity_T1 configuration achieves average wealth 1.052, consistent with a 5.2% return from modest risky allocation — a sensible constrained-optimal behavior.
 
-#### 2.7 Summary
+#### 3.2.7 Summary
 
 The PPO agent demonstrates:
 1. **Correctness**: Consistent with Merton theory in the single-asset limit
